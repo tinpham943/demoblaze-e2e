@@ -1,0 +1,38 @@
+{
+  "name": "demoblaze-e2e",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "E2E tests for DemoBlaze (Playwright + TypeScript)",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "playwright test",
+    "test:smoke": "playwright test --grep @smoke",
+    "test:regression": "playwright test --grep @regression",
+    "test:chromium": "playwright test --project=chromium",
+    "test:firefox": "playwright test --project=firefox",
+    "test:webkit": "playwright test --project=webkit",
+    "test:cross-browser": "playwright test --project=chromium --project=firefox --project=webkit",
+    "test:mobile": "playwright test --project=mobile-chrome --project=mobile-safari",
+    "test:api": "playwright test --project=api",
+    "test:perf": "playwright test -c playwright.perf.config.ts",
+    "report": "playwright show-report reports/html",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "format": "prettier --write ."
+  },
+  "devDependencies": {
+    "@faker-js/faker": "^10.6.0",
+    "@playwright/test": "1.63.0",
+    "@types/node": "^26.6.4",
+    "dotenv": "^18.0.5",
+    "eslint": "^10.12.0",
+    "eslint-plugin-playwright": "^2.12.0",
+    "prettier": "^3.9.9",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.71.0",
+    "zod": "^4.6.5"
+  }
+}

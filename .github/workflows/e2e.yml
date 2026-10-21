@@ -1,0 +1,142 @@
+name: E2E
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '0 1 * * *' # nightly full regression
+  workflow_dispatch:
+    inputs:
+      grep:
+        description: 'Tag filter, e.g. @smoke, @regression, @cart (empty = everything)'
+        required: false
+        default: ''
+
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+
+  test:
+    needs: static
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [chromium, firefox, webkit, mobile-chrome, mobile-safari, api]
+    env:
+      CI: 'true'
+      EVENT: ${{ github.event_name }}
+      GREP_INPUT: ${{ inputs.grep }}
+      # Optional overrides from repository variables.
+      BASE_URL: ${{ vars.BASE_URL }}
+      API_URL: ${{ vars.API_URL }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - name: Install the browser of this project
+        run: |
+          case "${{ matrix.project }}" in
+            firefox) npx playwright install --with-deps firefox ;;
+            webkit|mobile-safari) npx playwright install --with-deps webkit ;;
+            api) ;; # no browser
+            *) npx playwright install --with-deps chromium ;;
+          esac
+      - name: Run tests
+        # Push / PR: smoke only. Nightly: everything. Manual: the tag you pass (empty = everything).
+        # Chosen in the shell: in a ${{ }} expression an empty string is falsy, so `a && '' || b` always gives b.
+        run: |
+          case "$EVENT" in
+            push|pull_request) GREP='@smoke' ;;
+            workflow_dispatch) GREP="$GREP_INPUT" ;;
+            *) GREP='' ;;
+          esac
+          npx playwright test --project=${{ matrix.project }} ${GREP:+--grep "$GREP"} --pass-with-no-tests
+      # reports/blob holds the results with their screenshots, videos and traces; the report job merges them.
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: report-${{ matrix.project }}
+          path: reports/
+          retention-days: 14
+
+  perf:
+    # Timing budgets: nightly and manual runs only, on a runner of their own (see playwright.perf.config.ts).
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: static
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CI: 'true'
+      BASE_URL: ${{ vars.BASE_URL }}
+      API_URL: ${{ vars.API_URL }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:perf
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: report-perf
+          path: reports/
+          retention-days: 14
+
+  report:
+    # One HTML report for all projects of the run, also when tests failed (that is when it is needed most).
+    if: ${{ !cancelled() }}
+    needs: [test, perf]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: report-*
+          path: all-reports
+      - name: Merge the blob reports
+        run: |
+          mkdir -p blobs
+          cp all-reports/*/blob/*.zip blobs/
+          npx playwright merge-reports --reporter html ./blobs
+        env:
+          PLAYWRIGHT_HTML_OUTPUT_DIR: html-report
+      - uses: actions/upload-artifact@v7
+        with:
+          name: html-report
+          path: html-report/
+          retention-days: 14
+      - uses: actions/upload-pages-artifact@v5
+        if: github.ref == 'refs/heads/main'
+        with:
+          path: html-report/
+
+  deploy-report:
+    # Publishes the merged report of the latest main run to GitHub Pages.
+    if: ${{ !cancelled() && needs.report.result == 'success' && github.ref == 'refs/heads/main' }}
+    needs: report
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency: pages
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

@@ -1,0 +1,11 @@
+node_modules/
+# local configuration — never commit
+.env*
+!.env.example
+# run artifacts
+test-results/
+playwright-report/
+blob-report/
+reports/
+playwright/.cache/
+.DS_Store
